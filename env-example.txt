@@ -1,0 +1,4 @@
+# Salin ke .env:  cp env-example.txt .env
+# Rahasia webhook pembayaran (nilai webhook_secret di settings.json lebih diutamakan).
+# Buat nilai acak:  openssl rand -hex 32
+MY_WEBHOOK_SECRET=ganti-dengan-secret-anda

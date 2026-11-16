@@ -1,0 +1,177 @@
+--- a/services/mikrotikService.js	2026-11-16 10:44:57.644390289 +0000
++++ b/services/mikrotikService.js	2026-11-16 10:44:17.663234974 +0000
+@@ -1631,15 +1631,17 @@
+ }
+ 
+ async function generateIsolirPortalScript() {
+-  const target = await resolveIsolirPortalTarget(getSettingsWithCache() || {});
++  const settings = getSettingsWithCache() || {};
++  const target = await resolveIsolirPortalTarget(settings);
+   const { url, hostname, billingIp, redirectPort } = target;
++  const poolRange = getIsolirPoolAddressRange(settings);
+ 
+   const lines = [
+     '# ============================================================',
+     '# Script halaman isolir / portal penagihan (generate Billing)',
+     `# Sumber URL: ${url}`,
+     `# Host: ${hostname}  →  IP NAT: ${billingIp}`,
+-    '# Address-list: LIST_ISOLIR — saat isolir, billing memasang on-up di profil PPPoE (nama = isolir_profile pelanggan).',
++    '# Address-list: LIST_ISOLIR — terisi dari rentang pool isolir di Pengaturan RADIUS billing + on-up profil PPPoE isolir.',
+     '# Redirect HTTP saja. HTTPS tidak dialihkan karena redirector tidak dapat menangani TLS.',
+     '# ============================================================',
+     '',
+@@ -1647,6 +1649,19 @@
+     '/ip firewall address-list remove [find list=BILLING comment="OPEN_ISP_BILLING_PORTAL"]',
+     `/ip firewall address-list add list=BILLING address=${billingIp} comment="OPEN_ISP_BILLING_PORTAL"`,
+     '',
++    '# --- Pool isolir (otomatis mengikuti Pengaturan RADIUS billing) ---',
++    '/ip firewall address-list remove [find list=LIST_ISOLIR comment=\"BILLING_ISOLIR_POOL\"]',
++    ...(poolRange ? [`/ip firewall address-list add list=LIST_ISOLIR address=${poolRange} comment=\"BILLING_ISOLIR_POOL\"`] : ['# (mode isolir = reject, tidak ada pool isolir)']),
++    '',
++    '# --- Bersihkan rule lama bertanda script ini agar tidak dobel jika dijalankan ulang ---',
++    '/ip firewall filter remove [find comment=\"BILLING_ISOLIR_DNS\"]',
++    '/ip firewall filter remove [find comment=\"BILLING_ISOLIR_DNS_TCP\"]',
++    '/ip firewall filter remove [find comment=\"BILLING_ISOLIR_ALLOW\"]',
++    '/ip firewall filter remove [find comment=\"BILLING_ISOLIR_WHATSAPP\"]',
++    '/ip firewall filter remove [find comment=\"BILLING_ISOLIR_BLOCK_REST\"]',
++    '/ip firewall nat remove [find comment=\"BILLING_ISOLIR_HTTP\"]',
++    '/ip firewall address-list remove [find list=WHATSAPP comment=\"Meta/WhatsApp\"]',
++    '',
+     '# --- DNS ---',
+     '/ip firewall filter add chain=forward src-address-list=LIST_ISOLIR protocol=udp dst-port=53 action=accept comment="BILLING_ISOLIR_DNS"',
+     '/ip firewall filter add chain=forward src-address-list=LIST_ISOLIR protocol=tcp dst-port=53 action=accept comment="BILLING_ISOLIR_DNS_TCP"',
+@@ -1676,7 +1691,7 @@
+     '',
+     '# --- PPPoE: contoh memasukkan IP ke LIST_ISOLIR saat login (nama profil = isolir) ---',
+     '# Jalankan sekali, atau salin ke on-up profil isolir di Winbox:',
+-    '# /ppp profile set [find name=isolir] on-up="/ip firewall address-list add list=LIST_ISOLIR address=$remote-address comment=$user timeout=23h"',
++    '# /ppp profile set [find name=isolir] on-up=\"/ip firewall address-list add list=LIST_ISOLIR address=\\$\\\"remote-address\\\" comment=\\$user timeout=23h\"',
+     '',
+   ];
+ 
+@@ -1797,6 +1812,62 @@
+ }
+ 
+ const ISOLIR_ADDR_LIST = 'LIST_ISOLIR';
++// Penanda entri address-list yang dikelola otomatis dari pengaturan RADIUS billing.
++const ISOLIR_POOL_COMMENT = 'BILLING_ISOLIR_POOL';
++// Variabel PPP RouterOS yang namanya memakai tanda hubung wajib diberi kutip.
++const ROS_REMOTE_ADDRESS = '$"remote-address"';
++
++/**
++ * Rentang IP isolir dari Pengaturan RADIUS billing (radius_isolir_ip_pool_start/end)
++ * dalam format address-list MikroTik ("a-b"). Null jika isolir memakai mode reject
++ * atau rentang tidak valid. Dengan ini LIST_ISOLIR otomatis mengikuti pool isolir billing,
++ * tanpa perlu mengubah script secara manual.
++ */
++function getIsolirPoolAddressRange(settings = {}) {
++  const action = String(settings.radius_isolir_action || 'pool').trim() || 'pool';
++  if (action === 'reject') return null;
++  const start = String(settings.radius_isolir_ip_pool_start || '10.10.99.2').trim();
++  const end = String(settings.radius_isolir_ip_pool_end || '10.10.99.254').trim();
++  const a = _ipInt(start);
++  const b = _ipInt(end);
++  if (a === null || b === null || a > b) return null;
++  return a === b ? start : `${start}-${end}`;
++}
++
++/**
++ * Sinkronkan entri LIST_ISOLIR (comment BILLING_ISOLIR_POOL) dengan rentang pool isolir billing.
++ * Idempotent: entri lama yang rentangnya berbeda diganti, entri yang sudah sesuai dibiarkan.
++ */
++async function ensureIsolirPoolAddressList(conn, settings = {}) {
++  const range = getIsolirPoolAddressRange(settings);
++  const menu = conn.client.menu('/ip/firewall/address-list');
++  const rows = await menu.get();
++  const managed = (Array.isArray(rows) ? rows : []).filter((e) =>
++    String(e.list || '') === ISOLIR_ADDR_LIST && String(e.comment || '') === ISOLIR_POOL_COMMENT
++  );
++  let kept = false;
++  let changed = false;
++  for (const e of managed) {
++    const id = e['.id'] || e.id;
++    if (range && !kept && String(e.address || '') === range) {
++      kept = true;
++      if (['yes', 'true'].includes(String(e.disabled || '').toLowerCase()) && id) {
++        await menu.set({ disabled: 'no' }, id);
++        changed = true;
++      }
++      continue;
++    }
++    if (id) {
++      await menu.remove(id);
++      changed = true;
++    }
++  }
++  if (range && !kept) {
++    await menu.add({ list: ISOLIR_ADDR_LIST, address: range, comment: ISOLIR_POOL_COMMENT });
++    changed = true;
++  }
++  return { range, changed };
++}
+ 
+ /** Nama profil PPPoE isolir yang dipakai pelanggan di router ini (distinct dari DB). */
+ function getDistinctIsolirProfilesForRouter(routerId) {
+@@ -1849,10 +1920,15 @@
+     onUp = onUp.trim();
+     onDown = onDown.trim();
+ 
++    // Perbaiki hook lama yang memakai $remote-address tanpa kutip (tidak valid di RouterOS).
++    const fixRa = (txt) => txt.replace(/\$remote-address/g, () => ROS_REMOTE_ADDRESS);
++    onUp = fixRa(onUp);
++    onDown = fixRa(onDown);
++
+     const hookUp =
+-      `/ip firewall address-list remove [find list=${ISOLIR_ADDR_LIST} address=$remote-address]; ` +
+-      `/ip firewall address-list add list=${ISOLIR_ADDR_LIST} address=$remote-address comment=$user timeout=23h`;
+-    const hookDown = `/ip firewall address-list remove [find list=${ISOLIR_ADDR_LIST} address=$remote-address]`;
++      `/ip firewall address-list remove [find list=${ISOLIR_ADDR_LIST} address=${ROS_REMOTE_ADDRESS}]; ` +
++      `/ip firewall address-list add list=${ISOLIR_ADDR_LIST} address=${ROS_REMOTE_ADDRESS} comment=$user timeout=23h`;
++    const hookDown = `/ip firewall address-list remove [find list=${ISOLIR_ADDR_LIST} address=${ROS_REMOTE_ADDRESS}]`;
+ 
+     const addSnip = `address-list add list=${ISOLIR_ADDR_LIST}`;
+     const remSnip = `remove [find list=${ISOLIR_ADDR_LIST}`;
+@@ -1899,6 +1975,14 @@
+       if (id) await addressListMenu.set({ disabled: 'no' }, id);
+     }
+ 
++    // LIST_ISOLIR otomatis memuat rentang pool isolir dari Pengaturan RADIUS billing.
++    let poolSync = null;
++    try {
++      poolSync = await ensureIsolirPoolAddressList(conn, settings);
++    } catch (e) {
++      logger.warn(`[MikroTik] Sinkron pool isolir ke ${ISOLIR_ADDR_LIST} gagal: ${e.message}`);
++    }
++
+     // 1. HTTP-only NAT; HTTPS is intentionally left unchanged because the redirector is plain HTTP.
+     const natMenu = conn.client.menu('/ip/firewall/nat');
+     const ensureNat = async (comment, dstPort, toPort) => {
+@@ -2010,7 +2094,7 @@
+ 
+     return {
+       success: true,
+-      message: `Firewall isolir + NAT siap. Profil PPPoE di-hook ke ${ISOLIR_ADDR_LIST}: ${okNames || '-'}.${warn}`,
++      message: `Firewall isolir + NAT siap. ${poolSync && poolSync.range ? `Pool isolir ${poolSync.range} masuk ${ISOLIR_ADDR_LIST}. ` : ''}Profil PPPoE di-hook ke ${ISOLIR_ADDR_LIST}: ${okNames || '-'}.${warn}`,
+       hooks: hookResults,
+     };
+   } catch (e) {
+@@ -2598,6 +2682,8 @@
+   setupPppoeNetwork,
+   buildPoolRanges,
+   ensurePppProfileIsolirAddressListHook,
++  getIsolirPoolAddressRange,
++  ensureIsolirPoolAddressList,
+   generateIsolirPortalScript,
+   generateIsolirCloudScript,
+   manageStaticIp,
+--- /tmp/orig/a/services/radiusServerService.js	2026-11-16 10:44:57.645638447 +0000
++++ services/radiusServerService.js	2026-11-16 10:44:17.663847852 +0000
+@@ -205,7 +205,7 @@
+     }
+   } else if (reqPacket.parsedAttrs.password !== undefined) {
+     if (reqPacket.parsedAttrs.password !== user.secret) {
+-      logger.warn(`[RADIUS Auth] Reject '${username}' - Password PAP salah (input: '${reqPacket.parsedAttrs.password}', expected: '${user.secret}')`);
++      logger.warn(`[RADIUS Auth] Reject '${username}' - Password PAP salah`);
+       sendAuthResponse(CODES.ACCESS_REJECT, reqPacket, [], secret, rinfo);
+       return;
+     }
