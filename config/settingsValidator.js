@@ -126,6 +126,18 @@ const VALIDATION_RULES = {
     max: 65535,
     description: 'Port MikroTik'
   },
+  due_day: {
+    type: 'number',
+    min: 1,
+    max: 28,
+    description: 'Tanggal jatuh tempo/isolir semua pelanggan (1-28)'
+  },
+  invoice_day: {
+    type: 'number',
+    min: 1,
+    max: 28,
+    description: 'Tanggal terbit tagihan bulanan (1-28)'
+  },
   isolir_day: {
     type: 'number',
     min: 1,
