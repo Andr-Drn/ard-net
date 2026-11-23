@@ -1990,8 +1990,8 @@ router.get('/dashboard', async (req, res) => {
   const _statusActive = ['active','aktif'].indexOf(_statusRaw) !== -1;
   const _statusText = _statusActive ? _t('common.active','Aktif') : String(_prof.status || _dev.status || '-');
   const _fmt = n => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
-  const _isolateDay = Math.max(1, Math.min(28, Number(_prof.isolate_day || (settings && settings.isolir_day) || 10)));
-  const _isolirOf = (y, m) => { const d = new Date(y, (m || 1) - 1, _isolateDay); return d.getDate() + ' ' + _mNames[d.getMonth()] + ' ' + d.getFullYear(); };
+  const _isolateDay = Math.max(1, Math.min(28, Number((settings && settings.due_day) || 1)));
+  const _isolirOf = (y, m) => { const d = require('../services/billingService').getDueDate(m || 1, y, _isolateDay); return d.getDate() + ' ' + _mNames[d.getMonth()] + ' ' + d.getFullYear(); };
   const _periodLabel = inv => inv ? ((_mNames[(Number(inv.period_month) || 1) - 1] || '') + ' ' + (inv.period_year || '')) : '';
   const _invs = (invoices || []).slice().sort((a,b) => ((b.period_year*100)+(b.period_month||0)) - ((a.period_year*100)+(a.period_month||0)));
   const _unpaid = _invs.find(i => { const st = String(i.status || '').toLowerCase(); return ['paid','lunas','void','hangus','batal'].indexOf(st) === -1; });
