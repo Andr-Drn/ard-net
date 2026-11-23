@@ -101,7 +101,7 @@ const DEFAULT_MENU_STATES = {
   map: STATE_VISIBLE,
   acs_pro: STATE_VISIBLE,
   onu_provision: STATE_VISIBLE,
-  olts: STATE_HIDDEN,
+  olts: STATE_VISIBLE,
   whatsapp: STATE_VISIBLE,
   automation: STATE_VISIBLE,
   custom_qr: STATE_VISIBLE,
