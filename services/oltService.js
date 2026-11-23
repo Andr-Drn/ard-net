@@ -1,6 +1,6 @@
 const snmp = require('net-snmp');
 const net = require('net');
-const Database = require('better-sqlite3');
+//const Database = require('better-sqlite3');
 const path = require('path');
 const winston = require('winston');
 const axios = require('axios');
@@ -25,9 +25,9 @@ const logger = winston.createLogger({
   ]
 });
 
-const dbPath = path.join(__dirname, '../database/billing.db');
-const db = new Database(dbPath);
-
+//const dbPath = path.join(__dirname, '../database/billing.db');
+//const db = new Database(dbPath);
+const db = require('../config/database');
 /**
  * Profil SNMP per brand OLT
  * Setiap profil mendefinisikan OID tabel untuk status, nama, dan cara deteksi.
