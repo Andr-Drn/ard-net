@@ -156,9 +156,15 @@ async function runAutoBillingReminder() {
       } else {
         const unpaidCount = Number(c.unpaid_count || 0) || 0;
         if (unpaidCount > 0) {
-          const dueDay = Number(c.isolate_day || 0) || Number(getSetting('isolir_day', 10) || 10) || 10;
           const offsets = String(getSetting('reminder_days_before', '2')).split(',').map(function (x) { return parseInt(x, 10); }).filter(function (n) { return Number.isFinite(n) && n > 0; });
-          shouldSend = offsets.some(function (off) { return (dueDay - off) >= 1 && day === (dueDay - off); });
+          const unpaidInv = db.prepare("SELECT period_month, period_year FROM invoices WHERE customer_id=? AND status='unpaid'").all(c.id);
+          shouldSend = unpaidInv.some(function (inv) {
+            const due = billingSvc.getDueDate(inv.period_month, inv.period_year, c.isolate_day);
+            return offsets.some(function (off) {
+              const r = new Date(due.getFullYear(), due.getMonth(), due.getDate() - off);
+              return r.getFullYear() === today.getFullYear() && r.getMonth() === today.getMonth() && r.getDate() === today.getDate();
+            });
+          });
         }
       }
 
@@ -359,13 +365,16 @@ async function runAutoBillingReminder() {
 }
 
 function startCronJobs() {
-  // 1. Generate Tagihan Otomatis setiap tanggal 1 jam 00:01
-  cron.schedule('1 0 1 * *', () => {
+  // 1. Generate Tagihan Otomatis (periode bulan berjalan) tiap tanggal invoice_day (default 24) jam 00:01
+  cron.schedule('1 0 * * *', () => {
     const now = new Date();
     const month = now.getMonth() + 1;
     const year = now.getFullYear();
-    
-    logger.info(`[CRON] Menjalankan generate tagihan otomatis untuk ${month}/${year}`);
+    const lastDay = new Date(year, month, 0).getDate();
+    const invoiceDay = Math.min(billingSvc.getInvoiceDay(), lastDay);
+    if (now.getDate() !== invoiceDay) return;
+
+    logger.info(`[CRON] Menjalankan generate tagihan otomatis untuk ${month}/${year} (tanggal terbit ${invoiceDay})`);
     try {
       const count = billingSvc.generateMonthlyInvoices(month, year);
       logger.info(`[CRON] Berhasil generate ${count} tagihan otomatis.`);
@@ -417,8 +426,12 @@ function startCronJobs() {
           }
         } else {
           const customerIsolirDay = c.isolate_day || 10;
-          const unpaidCount = db.prepare('SELECT COUNT(*) as cnt FROM invoices WHERE customer_id=? AND status=?').get(c.id, 'unpaid')?.cnt || 0;
-          if (today >= customerIsolirDay && unpaidCount > 0) {
+          const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const unpaidInv = db.prepare("SELECT period_month, period_year FROM invoices WHERE customer_id=? AND status=?").all(c.id, 'unpaid');
+          const overdue = unpaidInv.some(function (inv) {
+            return billingSvc.getDueDate(inv.period_month, inv.period_year, customerIsolirDay) <= todayStart;
+          });
+          if (overdue) {
             try {
               logger.info(`[CRON] Isolir otomatis PASCABAYAR: ${c.name} (${c.pppoe_username || c.hotspot_username || '-'}) - Tgl Isolir: ${customerIsolirDay}`);
               await customerSvc.suspendCustomer(c.id);

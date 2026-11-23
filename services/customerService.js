@@ -334,7 +334,7 @@ function createCustomer(data) {
     expiredAt,
     data.notes || '',
     data.auto_isolate !== undefined ? parseInt(data.auto_isolate) : 1,
-    data.isolate_day !== undefined ? parseInt(data.isolate_day) : 10,
+    data.isolate_day !== undefined ? parseInt(data.isolate_day) : 1,
     data.connection_type || 'pppoe',
     data.static_ip || '',
     data.mac_address || '',

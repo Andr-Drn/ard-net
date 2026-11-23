@@ -6,6 +6,35 @@ const auditTrail = require('./auditTrailService');
 const { getCurrentDateInTimezone, getSetting } = require('../config/settingsManager');
 const { logger } = require('../config/logger');
 
+
+// ── Tanggal terbit tagihan & jatuh tempo/isolir ─────────────────────────────
+// Tagihan periode bulan berjalan terbit tiap tanggal `invoice_day` (default 24).
+// Jatuh tempo/isolir = tanggal `isolate_day` pelanggan. Jika tanggal isolir lebih
+// besar dari tanggal terbit -> di bulan yang sama; jika lebih kecil/sama -> bulan berikutnya
+// (contoh: terbit 24, isolir 1 -> tagihan Nov terbit 24 Nov, isolir 1 Des).
+function getInvoiceDay() {
+  const n = parseInt(getSetting('invoice_day', 24), 10);
+  return Number.isFinite(n) ? Math.max(1, Math.min(28, n)) : 24;
+}
+
+// Tanggal jatuh tempo/isolir berlaku GLOBAL untuk semua pelanggan (setting `due_day`, default 1);
+// kolom isolate_day per pelanggan tidak dipakai lagi (parameter ke-3 diabaikan).
+function getDueDay() {
+  const n = parseInt(getSetting('due_day', 1), 10);
+  return Number.isFinite(n) ? Math.max(1, Math.min(28, n)) : 1;
+}
+
+function getDueDate(periodMonth, periodYear) {
+  const invDay = getInvoiceDay();
+  const iso = getDueDay();
+  const offset = iso > invDay ? 0 : 1;
+  const m0 = (Number(periodMonth) || 1) - 1 + offset;
+  const y = Number(periodYear) + Math.floor(m0 / 12);
+  const m = ((m0 % 12) + 12) % 12;
+  const last = new Date(y, m + 1, 0).getDate();
+  return new Date(y, m, Math.min(iso, last));
+}
+
 function daysInMonth(year, month1to12) {
   return new Date(year, month1to12, 0).getDate();
 }
@@ -818,6 +847,7 @@ module.exports = {
   getInvoicesByAny,
   getUnpaidInvoicesByCustomerId,
   renewCustomerPrepaidValidity,
+  getInvoiceDay, getDueDay, getDueDate,
   generateMonthlyInvoices, generateInvoiceForCustomer, createInstallProrataCatchUpInvoice, payInvoiceForCustomerPeriod, payInvoicesForCustomerMonths, getPaidMonthsForCustomerYear, getCustomerBillingYearSummary, getAllInvoices, getInvoiceById,
   markAsPaid, markAsUnpaid, deleteInvoice,
   getInvoiceSummary, getMonthlyRevenue, voidPreviousUnpaidInvoices,

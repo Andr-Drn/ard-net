@@ -135,7 +135,7 @@ async function importSecrets({ routerId, usernames, includeDisabled = false } = 
         connection_type: 'pppoe',
         is_radius: 0,
         auto_isolate: 1,
-        isolate_day: 10,
+        isolate_day: 1,
         notes: 'Diimpor dari secret MikroTik (' + stamp + ')' + (c.profile ? ', profil: ' + c.profile : '')
       });
       ctx.existingUsers.add(c.username);
