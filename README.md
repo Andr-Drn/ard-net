@@ -105,7 +105,7 @@ Policy `sensitive` dibutuhkan agar password secret PPPoE terbaca saat **Impor da
 ### Pilihan A — Node.js + PM2
 
 ```bash
-git clone <URL-REPO-ANDA> ~/ard-net
+git clone <https://github.com/Andr-Drn/ard-net> ~/ard-net
 cd ~/ard-net
 npm ci --omit=dev
 pm2 start ecosystem.config.js
@@ -125,7 +125,7 @@ curl -s localhost:3001/health
 ### Pilihan B — Docker
 
 ```bash
-git clone <URL-REPO-ANDA> ~/ard-net
+git clone <https://github.com/Andr-Drn/ard-net> ~/ard-net
 cd ~/ard-net
 mkdir -p docker-data/{config,database,logs,uploads,baileys,backups}
 echo '{"server_port":3001,"cookie_secure":false}' > docker-data/config/settings.json
